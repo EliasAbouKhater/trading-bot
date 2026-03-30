@@ -74,6 +74,18 @@ When prices are high, your fixed amount buys less. When prices are low, it buys 
 
 ---
 
+## Before You Put Real Money In
+
+**Start with a paper account and backtest first.**
+
+Alpaca offers free paper trading — a simulated account with fake money that behaves exactly like the real thing. Run the bot there for a few weeks. Watch how it behaves. Get comfortable with it.
+
+Before that, run a backtest on historical data. The bot includes a backtesting engine for exactly this purpose — test your chosen allocations across different market periods (a bull run, a crash, a sideways market) and see how the strategy would have performed. If the numbers make you nervous, adjust your allocations before any real money is involved.
+
+The sequence: **backtest → paper trade → real money.** Never skip steps.
+
+---
+
 ## The Bottom Line
 
 This bot is not trying to beat hedge funds or predict the next crash. It's trying to be a disciplined, automated version of what every long-term investor knows they should do but rarely does consistently:
@@ -81,3 +93,21 @@ This bot is not trying to beat hedge funds or predict the next crash. It's tryin
 > **Diversify. Rebalance regularly. Add money every month. React to market conditions without panicking.**
 
 Set it up once. Let it run.
+
+---
+
+## Disclaimer
+
+Nothing in this document or this project is investing advice. The strategy described here is shared for educational and informational purposes only.
+
+The developer does not take responsibility for any financial loss — or gain — that results from using this software. Markets are unpredictable. Past performance, even in backtests, is not a guarantee of future results. You are solely responsible for any financial decisions you make.
+
+When in doubt, consult a licensed financial advisor.
+
+---
+
+## Get Involved
+
+This project is a work in progress and I'm genuinely open to ideas, feedback, and collaboration.
+
+If you have thoughts on the strategy, the code, or the approach — **open an issue or leave a comment**. If you're building something similar or thinking about it, **feel free to reach out**. The goal is to make long-term, automated investing more accessible, and that's easier with more perspectives.
