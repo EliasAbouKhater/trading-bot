@@ -1,0 +1,80 @@
+# Trading Bot Configuration
+# API keys: use env vars APCA_API_KEY_ID and APCA_API_SECRET_KEY
+
+alpaca:
+  paper: true
+  base_url: "https://paper-api.alpaca.markets"
+
+assets:
+  - symbol: BTC/USD
+    budget: 500
+  - symbol: ETH/USD
+    budget: 300
+  - symbol: SPY
+    budget: 500
+
+data:
+  provider: yfinance
+  cache_dir: data/
+  default_period: 6mo    # crypto hourly data limited to ~730 days
+  interval: 1h           # hourly bars — much more active
+  cache_max_hours: 1     # refresh cache every hour for active trading
+
+strategies:
+  active: ma_crossover
+
+  ma_crossover:
+    short_window: 8      # 8-hour fast MA
+    long_window: 34      # 34-hour slow MA (Fibonacci)
+    symbol: XRP/USD
+
+  grid:
+    symbol: XRP/USD
+    grid_low: 2.00
+    grid_high: 3.00
+    num_grids: 15        # tighter grid within recent range
+    order_size: 10
+
+  pairs:
+    symbol_a: XRP/USD
+    symbol_b: BTC/USD
+    lookback: 72         # 72 hours (3 days) for spread
+    entry_z: 1.5         # enter earlier
+    exit_z: 0.3          # exit closer to mean
+
+risk:
+  max_risk_per_trade_pct: 20.0    # 20% of portfolio per trade
+  stop_loss_pct: 8.0              # wider stop — crypto swings hard
+  take_profit_pct: 12.0           # let winners run more
+  max_drawdown_pct: 30.0          # crypto is volatile, wide kill switch
+  max_open_positions: 5
+
+# ---- Portfolio Rebalancing ----
+rebalance:
+  initial_capital: 1000         # starting amount in USD
+  monthly_dca: 100              # add this much every month
+  period: 2y                    # backtest period
+
+  # Per-asset drift thresholds (derived from historical volatility)
+  # threshold_i = vol_multiplier × annualized_vol_i, clamped to [min, max]
+  drift:
+    vol_multiplier: 0.20        # 20% of annualized vol → threshold in % points
+    min_pct: 2.0                # floor: never trigger below 2pp drift
+    max_pct: 20.0               # cap: always trigger above 20pp drift
+    bull_factor: 1.5            # widen thresholds in bull (let winners run)
+    bear_factor: 0.7            # tighten thresholds in bear (react faster)
+
+  allocations:
+    # Stocks — 50%
+    SPY: 0.30                   # S&P 500 (broad US market)
+    QQQ: 0.10                   # Nasdaq 100 (tech-heavy)
+    VGK: 0.10                   # FTSE Europe (international diversification)
+    # Gold — 25%
+    GLD: 0.25                   # Gold ETF (inflation hedge / safe haven)
+    # Crypto — 25%
+    BTC/USD: 0.15               # Bitcoin
+    ETH/USD: 0.10               # Ethereum
+
+dashboard:
+  host: 0.0.0.0
+  port: 5050

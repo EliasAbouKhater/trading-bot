@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="grid">
+    <!-- Account Panel -->
+    <div class="card" id="account-card">
+        <h2>Paper Account</h2>
+        <div id="account-info" class="loading">Loading...</div>
+    </div>
+
+    <!-- Signal Panel -->
+    <div class="card" id="signal-card">
+        <h2>Current Signal</h2>
+        <div class="control-row">
+            <select id="signal-strategy">
+                {% for s in strategies %}
+                <option value="{{ s }}" {{ 'selected' if s == active }}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <button onclick="checkSignal()">Check Signal</button>
+        </div>
+        <div id="signal-result"></div>
+    </div>
+</div>
+
+<!-- Strategy Comparison -->
+<div class="card full-width">
+    <div class="card-header">
+        <h2>Strategy Comparison</h2>
+        <button onclick="runCompare()" id="compare-btn">Run Backtest Comparison</button>
+    </div>
+    <div id="compare-table"></div>
+    <canvas id="equity-chart" style="display:none; max-height:400px;"></canvas>
+</div>
+
+<!-- Single Strategy Backtest -->
+<div class="card full-width">
+    <div class="card-header">
+        <h2>Detailed Backtest</h2>
+        <div class="control-row">
+            <select id="bt-strategy">
+                {% for s in strategies %}
+                <option value="{{ s }}" {{ 'selected' if s == active }}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <button onclick="runBacktest()">Run</button>
+        </div>
+    </div>
+    <div id="bt-results"></div>
+    <canvas id="bt-chart" style="display:none; max-height:350px;"></canvas>
+    <div id="bt-trades"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let equityChart = null;
+let btChart = null;
+
+// Load account on page load
+window.addEventListener('load', loadAccount);
+
+async function loadAccount() {
+    const el = document.getElementById('account-info');
+    try {
+        const res = await fetch('/api/account');
+        const data = await res.json();
+        if (data.error) { el.innerHTML = `<span class="error">${data.error}</span>`; return; }
+        const a = data.account;
+        let html = `
+            <div class="metrics-row">
+                <div class="metric"><span class="label">Status</span><span class="value">${a.status}</span></div>
+                <div class="metric"><span class="label">Equity</span><span class="value">$${Number(a.equity).toLocaleString('en', {minimumFractionDigits:2})}</span></div>
+                <div class="metric"><span class="label">Cash</span><span class="value">$${Number(a.cash).toLocaleString('en', {minimumFractionDigits:2})}</span></div>
+                <div class="metric"><span class="label">Buying Power</span><span class="value">$${Number(a.buying_power).toLocaleString('en', {minimumFractionDigits:2})}</span></div>
+            </div>`;
+        if (data.positions.length > 0) {
+            html += '<h3>Positions</h3><table><tr><th>Symbol</th><th>Qty</th><th>Entry</th><th>Current</th><th>P&L</th></tr>';
+            data.positions.forEach(p => {
+                const pnlClass = p.unrealized_pnl >= 0 ? 'profit' : 'loss';
+                html += `<tr><td>${p.symbol}</td><td>${p.qty.toFixed(4)}</td><td>$${p.avg_entry.toFixed(2)}</td>
+                    <td>$${p.current_price.toFixed(2)}</td>
+                    <td class="${pnlClass}">$${p.unrealized_pnl >= 0 ? '+' : ''}${p.unrealized_pnl.toFixed(2)} (${p.unrealized_pnl_pct >= 0 ? '+' : ''}${p.unrealized_pnl_pct.toFixed(1)}%)</td></tr>`;
+            });
+            html += '</table>';
+        } else {
+            html += '<p class="muted">No open positions</p>';
+        }
+        el.innerHTML = html;
+        el.classList.remove('loading');
+    } catch(e) {
+        el.innerHTML = `<span class="error">Connection failed: ${e.message}</span>`;
+    }
+}
+
+async function checkSignal() {
+    const strategy = document.getElementById('signal-strategy').value;
+    const el = document.getElementById('signal-result');
+    el.innerHTML = '<span class="loading">Checking...</span>';
+    try {
+        const res = await fetch('/api/paper-signal', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({strategy})
+        });
+        const data = await res.json();
+        const sigClass = data.signal === 'BUY' ? 'signal-buy' : data.signal === 'SELL' ? 'signal-sell' : 'signal-hold';
+        el.innerHTML = `
+            <div class="signal-display ${sigClass}">
+                <div class="signal-label">${data.signal}</div>
+                <div class="signal-detail">${data.symbol} @ $${data.price} | ${data.date}</div>
+            </div>`;
+    } catch(e) {
+        el.innerHTML = `<span class="error">${e.message}</span>`;
+    }
+}
+
+async function runCompare() {
+    const btn = document.getElementById('compare-btn');
+    btn.disabled = true; btn.textContent = 'Running...';
+    const el = document.getElementById('compare-table');
+    try {
+        const res = await fetch('/api/compare', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+        const data = await res.json();
+        let html = `<table>
+            <tr><th>Strategy</th><th>Return</th><th>Trades</th><th>Win%</th><th>Drawdown</th><th>Sharpe</th><th>Final $</th></tr>`;
+        data.forEach(r => {
+            const retClass = r.total_return_pct >= 0 ? 'profit' : 'loss';
+            html += `<tr>
+                <td>${r.strategy}</td>
+                <td class="${retClass}">${r.total_return_pct >= 0 ? '+' : ''}${r.total_return_pct.toFixed(2)}%</td>
+                <td>${r.total_trades}</td><td>${r.win_rate_pct.toFixed(1)}%</td>
+                <td>${r.max_drawdown_pct.toFixed(2)}%</td><td>${r.sharpe_ratio.toFixed(2)}</td>
+                <td>$${r.final_equity.toFixed(2)}</td></tr>`;
+        });
+        html += '</table>';
+        el.innerHTML = html;
+
+        // Draw equity curves
+        const canvas = document.getElementById('equity-chart');
+        canvas.style.display = 'block';
+        if (equityChart) equityChart.destroy();
+
+        const colors = ['#4CAF50', '#2196F3', '#FF9800'];
+        const datasets = data.map((r, i) => ({
+            label: r.strategy,
+            data: r.equity_curve.map(p => ({x: p.date, y: p.equity})),
+            borderColor: colors[i % colors.length],
+            backgroundColor: 'transparent',
+            borderWidth: 2, pointRadius: 0, tension: 0.1,
+        }));
+
+        equityChart = new Chart(canvas, {
+            type: 'line',
+            data: {datasets},
+            options: {
+                responsive: true,
+                plugins: {title: {display: true, text: 'Equity Curves', color: '#e0e0e0'}},
+                scales: {
+                    x: {type: 'category', ticks: {color: '#999', maxTicksLimit: 12}},
+                    y: {ticks: {color: '#999', callback: v => '$' + v.toFixed(2)}}
+                }
+            }
+        });
+    } catch(e) {
+        el.innerHTML = `<span class="error">${e.message}</span>`;
+    }
+    btn.disabled = false; btn.textContent = 'Run Backtest Comparison';
+}
+
+async function runBacktest() {
+    const strategy = document.getElementById('bt-strategy').value;
+    const el = document.getElementById('bt-results');
+    const tradesEl = document.getElementById('bt-trades');
+    el.innerHTML = '<span class="loading">Running backtest...</span>';
+    try {
+        const res = await fetch('/api/backtest', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({strategy})
+        });
+        const r = await res.json();
+        const retClass = r.total_return_pct >= 0 ? 'profit' : 'loss';
+        el.innerHTML = `
+            <div class="metrics-row">
+                <div class="metric"><span class="label">Initial</span><span class="value">$${r.initial_capital.toFixed(2)}</span></div>
+                <div class="metric"><span class="label">Final</span><span class="value">$${r.final_equity.toFixed(2)}</span></div>
+                <div class="metric"><span class="label">Return</span><span class="value ${retClass}">${r.total_return_pct >= 0 ? '+' : ''}${r.total_return_pct.toFixed(2)}%</span></div>
+                <div class="metric"><span class="label">Trades</span><span class="value">${r.total_trades}</span></div>
+                <div class="metric"><span class="label">Win Rate</span><span class="value">${r.win_rate_pct.toFixed(1)}%</span></div>
+                <div class="metric"><span class="label">Max DD</span><span class="value">${r.max_drawdown_pct.toFixed(2)}%</span></div>
+                <div class="metric"><span class="label">Sharpe</span><span class="value">${r.sharpe_ratio.toFixed(2)}</span></div>
+            </div>`;
+
+        // Equity chart
+        const canvas = document.getElementById('bt-chart');
+        canvas.style.display = 'block';
+        if (btChart) btChart.destroy();
+        btChart = new Chart(canvas, {
+            type: 'line',
+            data: {datasets: [{
+                label: r.strategy + ' Equity',
+                data: r.equity_curve.map(p => ({x: p.date, y: p.equity})),
+                borderColor: '#4CAF50', backgroundColor: 'rgba(76,175,80,0.1)',
+                borderWidth: 2, pointRadius: 0, fill: true, tension: 0.1,
+            }]},
+            options: {
+                responsive: true,
+                scales: {
+                    x: {type: 'category', ticks: {color: '#999', maxTicksLimit: 12}},
+                    y: {ticks: {color: '#999', callback: v => '$' + v.toFixed(2)}}
+                }
+            }
+        });
+
+        // Trade log
+        if (r.trades.length > 0) {
+            let html = '<h3>Trade Log</h3><table><tr><th>Date</th><th>Action</th><th>Price</th><th>Shares</th><th>P&L</th></tr>';
+            r.trades.forEach(t => {
+                const pnlClass = t.pnl > 0 ? 'profit' : t.pnl < 0 ? 'loss' : '';
+                html += `<tr><td>${t.date}</td><td>${t.action}</td><td>$${t.price.toFixed(2)}</td>
+                    <td>${t.shares.toFixed(4)}</td>
+                    <td class="${pnlClass}">${t.pnl !== 0 ? '$' + (t.pnl >= 0 ? '+' : '') + t.pnl.toFixed(2) : '-'}</td></tr>`;
+            });
+            html += '</table>';
+            tradesEl.innerHTML = html;
+        }
+    } catch(e) {
+        el.innerHTML = `<span class="error">${e.message}</span>`;
+    }
+}
+</script>
+{% endblock %}
