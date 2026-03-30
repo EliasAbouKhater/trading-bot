@@ -15,6 +15,16 @@ A **regime-aware portfolio rebalancing bot** with backtesting, paper trading, an
 
 ---
 
+## Philosophy — Long-Term Investing, Not Day Trading
+
+This bot is not a day trader. It makes a handful of decisions per year. Its benchmark is **buy and hold** — and it's designed to beat it: capturing more gains when markets rise, and losing less when they fall.
+
+The core idea is **buy and hold with disciplined rebalancing**: when one asset grows beyond its target weight, the bot trims it and buys what fell behind — systematically selling high and buying low without predicting anything. Add regime detection (bull vs bear via SPY's 200-day SMA) and monthly DCA, and you get a system that adapts to market conditions while staying fully hands-off.
+
+**→ [Full investment philosophy and glossary](docs/PHILOSOPHY.md)**
+
+---
+
 ## Features
 
 - **Bull/Bear regime detection** via SPY 200-day SMA — adapts rebalancing frequency and drift thresholds to market conditions
