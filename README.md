@@ -1,6 +1,27 @@
 # Trading Bot
 
-A regime-aware portfolio rebalancing bot with backtesting, paper trading, and a live dashboard. Connects to [Alpaca](https://alpaca.markets) for order execution.
+[![CI](https://github.com/EliasAbouKhater/trading-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/EliasAbouKhater/trading-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Broker: Alpaca](https://img.shields.io/badge/broker-Alpaca-brightgreen.svg)](https://alpaca.markets)
+
+A **regime-aware portfolio rebalancing bot** with backtesting, paper trading, and a live dashboard. Connects to [Alpaca](https://alpaca.markets) for order execution across stocks, ETFs, and crypto.
+
+---
+
+> **Disclaimer:** This software is for educational and research purposes only. It does not constitute financial advice. Trading involves substantial risk of loss. Past performance is not indicative of future results. Use at your own risk.
+
+---
+
+## Features
+
+- **Bull/Bear regime detection** via SPY 200-day SMA — adapts rebalancing frequency and drift thresholds to market conditions
+- **Volatility-adjusted drift thresholds** — per-asset, computed from 1-year historical volatility, tighter in bear markets
+- **Monthly DCA** — distributes a fixed injection proportionally across all target assets
+- **Pluggable strategies** — MA crossover, grid trading, pairs mean-reversion (for paper/backtest mode)
+- **Backtesting engine** — test any strategy on historical data with detailed metrics
+- **Live dashboard** — Flask web UI showing portfolio state, positions, and regime
+- **Multi-asset** — stocks, ETFs, and crypto in a single portfolio via Alpaca
 
 ---
 
@@ -8,153 +29,181 @@ A regime-aware portfolio rebalancing bot with backtesting, paper trading, and a 
 
 ### 1. Macro Regime Detection
 
-Every run, the bot fetches SPY and computes its 200-day SMA. This determines the market regime:
+On every run, SPY is fetched and its 200-day SMA is computed:
 
-- **BULL**: SPY > SMA-200 → rebalance less frequently, let winners run
-- **BEAR**: SPY < SMA-200 → rebalance more frequently, tighten drift thresholds
+| Regime | Condition | Effect |
+|--------|-----------|--------|
+| **BULL** | SPY > SMA-200 | Rebalance every ~126 trading days, wider drift tolerance |
+| **BEAR** | SPY < SMA-200 | Rebalance every ~21 trading days, tighter drift tolerance |
 
 ### 2. Rebalancing Triggers
 
-Rebalancing fires when **either** condition is met:
+A rebalance fires when **either** condition is met:
 
 | Trigger | Description |
 |---------|-------------|
-| **Time** | Every ~126 trading days (BULL) or ~21 trading days (BEAR) |
-| **Drift** | Any asset deviates from its target allocation beyond a volatility-adjusted threshold |
+| **Time** | Scheduled interval elapsed (regime-dependent) |
+| **Drift** | Any asset deviates from its target weight beyond its volatility-adjusted threshold |
 
-Drift thresholds are computed per-asset from 1-year historical volatility:
+Drift threshold per asset:
 ```
-threshold = vol_multiplier × annualized_volatility
+threshold = vol_multiplier × annualized_volatility(1y)
            clamped to [min_pct, max_pct]
-           × regime_factor (wider in BULL, tighter in BEAR)
+           × regime_factor  (1.5× in BULL, 0.7× in BEAR)
 ```
 
 ### 3. Target Allocations
 
-Configured in `config.yaml`. Example (edit freely):
+Fully configurable in `config.yaml`. Example:
 
 ```yaml
 allocations:
-  SPY: 0.30    # 30% — broad US market
-  QQQ: 0.10    # 10% — tech-heavy
-  VGK: 0.10    # 10% — international
-  GLD: 0.25    # 25% — gold hedge
+  SPY: 0.30    # 30% — S&P 500 (broad US market)
+  QQQ: 0.10    # 10% — Nasdaq 100 (tech-heavy)
+  VGK: 0.10    # 10% — FTSE Europe (international)
+  GLD: 0.25    # 25% — Gold ETF (inflation hedge)
   BTC/USD: 0.15  # 15% — Bitcoin
   ETH/USD: 0.10  # 10% — Ethereum
 ```
 
-### 4. DCA (Dollar-Cost Averaging)
+### 4. Order Execution
 
-Configured via `monthly_dca` in `config.yaml`. Once per calendar month, the configured amount is added to the portfolio value before calculating target weights, distributing the injection proportionally across all assets.
-
-### 5. Order Execution
-
-- Sells execute first (frees up cash), then buys
-- Alpaca fractional shares used for stocks; crypto is traded natively
-- Dust trades under $1 are skipped
+- Sells execute first to free up cash, then buys
+- Alpaca fractional shares for stocks/ETFs; native crypto pairs for digital assets
+- Trades under $1 (dust) are skipped automatically
 
 ---
 
-## Strategies (Paper Trading / Backtesting)
+## Requirements
 
-Three pluggable signal strategies for active paper trading:
-
-| Strategy | Description | Key Parameters |
-|----------|-------------|----------------|
-| `ma_crossover` | Golden/death cross on short vs long SMA | `short_window`, `long_window` |
-| `grid` | Buy/sell at fixed price levels within a range | `grid_low`, `grid_high`, `num_grids` |
-| `pairs` | Mean-reversion on the spread between two correlated assets | `entry_z`, `exit_z`, `lookback` |
+- Python 3.10+
+- [Alpaca Markets](https://alpaca.markets) account (paper or live)
+- Internet connection for market data (via `yfinance`)
 
 ---
 
-## Setup
-
-### 1. Install dependencies
+## Installation
 
 ```bash
+git clone https://github.com/EliasAbouKhater/trading-bot.git
+cd trading-bot
 pip install -r requirements.txt
 ```
 
-### 2. Configure API keys
+### Configure
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in your Alpaca API credentials
+# Fill in your Alpaca API credentials
 ```
 
-`.env` format:
-```
-APCA_API_KEY_ID=your_key
-APCA_API_SECRET_KEY=your_secret
-```
-
-### 3. Edit config
-
-```bash
-cp config.yaml config.yaml  # edit allocations, capital, DCA amount
-```
+Edit `config.yaml` to set your target allocations, capital, and DCA amount.
 
 ---
 
 ## Usage
 
 ```bash
-# Backtest all strategies and compare
+# Compare all strategies on historical data
 python3 run.py backtest --compare
 
 # Backtest a single strategy
 python3 run.py backtest --strategy ma_crossover
 
-# Check paper account status
+# Check paper account balance and positions
 python3 run.py account
 
 # Run a live paper trading signal check
 python3 run.py paper --strategy ma_crossover
 
-# Launch the dashboard (port 5050)
+# Launch the dashboard (http://localhost:5050)
 python3 app.py
 ```
 
-### Automated Rebalancing (cron)
+### Automated Rebalancing
+
+Run `cron_rebalance.py` on a schedule:
 
 ```bash
-# Run manually
+# Manual run
 python3 cron_rebalance.py
 
-# Add to crontab (daily at market open)
-0 14 * * 1-5 /path/to/venv/bin/python3 /path/to/trading-bot/cron_rebalance.py
+# Daily cron at 9 AM (weekdays)
+0 9 * * 1-5 /path/to/venv/bin/python3 /path/to/trading-bot/cron_rebalance.py
 ```
 
-Optional Telegram notifications: set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ADMIN_ID` in `.env`. Skip notifications are batched (default: every 3 days). Rebalance events and errors always notify immediately.
+Optional: set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ADMIN_ID` in `.env` for notifications. Skip events are batched into a summary every 3 days. Actual rebalances and errors always notify immediately.
+
+---
+
+## Strategies
+
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| `ma_crossover` | Golden/death cross on short vs long SMA | Trending markets |
+| `grid` | Buy/sell at fixed price levels within a range | Sideways/ranging markets |
+| `pairs` | Mean-reversion on the spread between two correlated assets | Pairs with stable correlation |
+
+### Adding a Strategy
+
+1. Create `strategies/my_strategy.py` inheriting `Strategy` from `strategies/base.py`
+2. Implement `generate_signals(df) -> df` — adds a `signal` column (`1` = buy, `-1` = sell, `0` = hold)
+3. Register it in `strategies/__init__.py`
+4. Add a config block under `strategies:` in `config.yaml`
 
 ---
 
 ## Risk Management
 
-Configurable in `config.yaml` under `risk:`:
+All parameters configurable under `risk:` in `config.yaml`:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `max_risk_per_trade_pct` | 20% | Max portfolio % per trade |
+| `max_risk_per_trade_pct` | 20% | Max portfolio % allocated per trade |
 | `stop_loss_pct` | 8% | Stop-loss trigger |
 | `take_profit_pct` | 12% | Take-profit trigger |
-| `max_drawdown_pct` | 30% | Portfolio kill switch |
-| `max_open_positions` | 5 | Position limit |
+| `max_drawdown_pct` | 30% | Portfolio-level kill switch |
+| `max_open_positions` | 5 | Max simultaneous open positions |
 
 ---
 
-## Adding a Strategy
+## Project Structure
 
-1. Create `strategies/my_strategy.py` inheriting `Strategy` from `strategies/base.py`
-2. Implement `generate_signals(df) -> df` — adds a `signal` column: `1` = buy, `-1` = sell, `0` = hold
-3. Register it in `strategies/__init__.py`
-4. Add a config section under `strategies:` in `config.yaml`
+```
+trading-bot/
+├── core/
+│   ├── broker.py          # Alpaca API wrapper
+│   ├── engine.py          # Backtesting engine
+│   ├── live_rebalance.py  # Live rebalancing logic + regime detection
+│   ├── risk.py            # Risk management
+│   └── data.py            # Market data fetching & caching
+├── strategies/
+│   ├── base.py            # Strategy base class
+│   ├── ma_crossover.py    # Moving average crossover
+│   ├── grid.py            # Grid trading
+│   └── pairs.py           # Pairs mean-reversion
+├── dashboard/             # Flask web UI
+├── data/                  # Cached market data (gitignored)
+├── logs/                  # Run logs (gitignored)
+├── config.yaml            # All tunable parameters
+├── .env.example           # API key template
+├── run.py                 # CLI entry point
+├── app.py                 # Dashboard entry point
+└── cron_rebalance.py      # Scheduled rebalancing runner
+```
 
 ---
 
 ## Stack
 
-- Python 3.10+
-- [Alpaca Markets](https://alpaca.markets) (broker API — paper and live)
-- pandas, yfinance, ta (technical analysis)
-- Flask (dashboard)
+- **Broker**: [Alpaca Markets](https://alpaca.markets) (paper + live, stocks/ETFs/crypto)
+- **Market data**: [yfinance](https://github.com/ranaroussi/yfinance)
+- **Analysis**: pandas, numpy, [ta](https://github.com/bukosabino/ta)
+- **Dashboard**: Flask
+- **Notifications**: Telegram Bot API (optional)
+
+---
+
+## License
+
+[MIT](LICENSE)
