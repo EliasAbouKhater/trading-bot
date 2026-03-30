@@ -7,6 +7,8 @@
 
 A **regime-aware portfolio rebalancing bot** with backtesting, paper trading, and a live dashboard. Connects to [Alpaca](https://alpaca.markets) for order execution across stocks, ETFs, and crypto.
 
+![Dashboard screenshot](docs/screenshot.png)
+
 ---
 
 > **Disclaimer:** This software is for educational and research purposes only. It does not constitute financial advice. Trading involves substantial risk of loss. Past performance is not indicative of future results. Use at your own risk.
