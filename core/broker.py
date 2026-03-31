@@ -113,6 +113,24 @@ class AlpacaBroker:
         orders = self.trading.get_orders(req)
         return [self._order_dict(o) for o in orders]
 
+    def get_clock(self) -> dict:
+        """Get market clock: is_open, next_open, next_close. Source of truth for market hours."""
+        clock = self.trading.get_clock()
+        return {
+            "is_open":    clock.is_open,
+            "next_open":  clock.next_open.isoformat(),
+            "next_close": clock.next_close.isoformat(),
+            "timestamp":  clock.timestamp.isoformat(),
+        }
+
+    def get_order_by_id(self, order_id: str) -> dict:
+        """Fetch a single order with fill details."""
+        order = self.trading.get_order_by_id(order_id)
+        d = self._order_dict(order)
+        d["filled_qty"]       = str(order.filled_qty)       if order.filled_qty       else "0"
+        d["filled_avg_price"] = str(order.filled_avg_price) if order.filled_avg_price else None
+        return d
+
     def cancel_order(self, order_id: str) -> None:
         """Cancel an open order by ID."""
         self.trading.cancel_order_by_id(order_id)
