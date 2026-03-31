@@ -113,6 +113,10 @@ class AlpacaBroker:
         orders = self.trading.get_orders(req)
         return [self._order_dict(o) for o in orders]
 
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel an open order by ID."""
+        self.trading.cancel_order_by_id(order_id)
+
     def close_position(self, symbol: str) -> dict:
         """Close entire position for a symbol."""
         order = self.trading.close_position(symbol)

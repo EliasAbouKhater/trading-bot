@@ -54,6 +54,8 @@ rebalance:
   initial_capital: 1000         # starting amount in USD
   monthly_dca: 100              # add this much every month
   period: 2y                    # backtest period
+  bull_days: 126                # rebalance interval in BULL mode (~6 months of trading days)
+  bear_days: 21                 # rebalance interval in BEAR mode (~1 month)
 
   # Per-asset drift thresholds (derived from historical volatility)
   # threshold_i = vol_multiplier × annualized_vol_i, clamped to [min, max]

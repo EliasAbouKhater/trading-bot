@@ -131,9 +131,11 @@ def main():
 
         broker = AlpacaBroker(paper=cfg["alpaca"].get("paper", True))
         acct   = broker.get_account()
-        macro  = get_macro_regime()
-        regime = macro["regime"]
         state  = load_state()
+        macro  = get_macro_regime(last_known_regime=state.get("last_regime", "BULL"))
+        regime = macro["regime"]
+        if macro.get("fallback"):
+            log.warning(f"get_macro_regime() fell back to last known regime: {regime} (network/data issue)")
 
         # Use deployed capital as portfolio value (not total equity incl. idle cash)
         positions = broker.get_positions()
@@ -161,6 +163,14 @@ def main():
                 log.info(f"  {v['symbol']}: {v['current_pct']:.1f}% vs target "
                          f"{v['target_pct']:.1f}% (drift {v['drift']:.1f}pp > {v['threshold']:.1f}pp)")
 
+        # If drift fired but there are already open orders, suppress force —
+        # the pending fills will move the portfolio toward target on their own.
+        if drift_triggered:
+            open_orders = broker.get_orders("open")
+            if open_orders:
+                log.info(f"Drift suppressed: {len(open_orders)} open order(s) still pending — waiting for fills")
+                drift_triggered = False
+
         # Run rebalance (force=True if drift triggered, else let time logic decide)
         result = run_live_rebalance(
             allocations=allocations,
@@ -176,6 +186,9 @@ def main():
         action  = result["action"]
         orders  = result.get("orders", [])
         log.info(f"Action: {action} | Orders: {len(orders)}")
+        for o in orders:
+            fee_str = f" (fee ~${o['est_fee']:.3f})" if o.get('est_fee') else ""
+            log.info(f"  {o['side']} {o['symbol']} ${o.get('notional', 0):.2f}{fee_str} → {o.get('status', '?')}")
 
         # Build Telegram message
         if action == "SKIP":
@@ -215,7 +228,8 @@ def main():
             for o in orders:
                 status = o.get("status", "?")
                 amt = f"${o.get('notional', 0):.2f}"
-                order_lines += f"\n  {'🟢' if o['side']=='BUY' else '🔴'} {o['side']} {o['symbol']} {amt} — {status}"
+                fee_str = f" (~${o['est_fee']:.3f} fee)" if o.get('est_fee') else ""
+                order_lines += f"\n  {'🟢' if o['side']=='BUY' else '🔴'} {o['side']} {o['symbol']} {amt}{fee_str} — {status}"
 
             drift_lines = ""
             if violators:

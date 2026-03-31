@@ -5,3 +5,7 @@ data/*.json
 logs/
 __pycache__/
 *.pyc
+CLAUDE.md
+
+test_gradual.py
+test_new_portfolio.py
