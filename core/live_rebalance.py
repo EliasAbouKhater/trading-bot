@@ -749,9 +749,10 @@ def build_daily_digest(state: dict, broker: AlpacaBroker,
 
 def should_send_digest(state: dict) -> bool:
     """True if digest hasn't been sent today and it's past 05:00 UTC (09:00 Dubai)."""
-    today = datetime.utcnow().date().isoformat()
-    return (state.get("last_digest_date") != today and
-            datetime.utcnow().hour >= 5)
+    from datetime import timezone
+    now_utc = datetime.now(timezone.utc)
+    today   = now_utc.date().isoformat()
+    return state.get("last_digest_date") != today and now_utc.hour >= 5
 
 
 # ── CLI pretty-print (backwards compat) ──────────────────────────────────────

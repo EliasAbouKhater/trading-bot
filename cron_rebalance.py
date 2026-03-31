@@ -119,7 +119,8 @@ def main():
             log.info("Sending daily digest...")
             msg = build_daily_digest(state, broker, allocations, cfg)
             send_telegram(msg)
-            state["last_digest_date"] = datetime.utcnow().date().isoformat()
+            from datetime import timezone
+            state["last_digest_date"] = datetime.now(timezone.utc).date().isoformat()
             save_state(state)
             log.info("Daily digest sent.")
 
