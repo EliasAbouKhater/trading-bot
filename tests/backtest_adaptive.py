@@ -46,8 +46,10 @@ DISPLAY = {
 INITIAL_CAPITAL   = 1000.0
 MONTHLY_DCA       = 100.0
 BULL_DAYS         = 126
-BEAR_DAYS         = 21
 DRIFT_THRESHOLD   = 5.0   # % drift from target to trigger early rebalance
+
+BEAR_CANDIDATES   = [21, 30, 35, 42]   # sweep these, pick best
+MA_TYPES          = ["SMA", "EMA"]      # regime detection method
 
 
 # ── Data fetch ─────────────────────────────────────────────────────────────────
@@ -172,22 +174,28 @@ def _run_fixed(prices: pd.DataFrame, every_n: int, label: str) -> dict:
     }
 
 
-def _run_adaptive(prices: pd.DataFrame) -> dict:
-    """Adaptive bull/bear rebalancer — mirrors live bot logic."""
-    sma200 = prices["SPY"].rolling(200).mean()
+def _run_adaptive(prices: pd.DataFrame, bear_days: int, ma_type: str = "SMA") -> dict:
+    """Adaptive bull/bear rebalancer.
+    ma_type: 'SMA' or 'EMA' for regime detection (200-period).
+    """
+    if ma_type == "EMA":
+        ma200 = prices["SPY"].ewm(span=200, adjust=False).mean()
+        label = f"Adaptive EMA bear={bear_days}d"
+    else:
+        ma200 = prices["SPY"].rolling(200).mean()
+        label = f"Adaptive SMA bear={bear_days}d"
 
-    holdings        = {s: INITIAL_CAPITAL * ALLOCATIONS[s] / prices[s].iloc[0] for s in prices.columns}
-    cash            = 0.0
-    last_m          = None
-    n_months        = 0
-    last_rebal_idx  = 0
-    rebal_log       = []
-    eq              = []
+    holdings       = {s: INITIAL_CAPITAL * ALLOCATIONS[s] / prices[s].iloc[0] for s in prices.columns}
+    cash           = 0.0
+    last_m         = None
+    n_months       = 0
+    last_rebal_idx = 0
+    rebal_log      = []
+    eq             = []
 
     for i, (date, row) in enumerate(prices.iterrows()):
         pv = cash + sum(holdings[s] * row[s] for s in prices.columns)
 
-        # DCA
         mk = (date.year, date.month)
         if last_m is None:
             last_m = mk
@@ -197,19 +205,17 @@ def _run_adaptive(prices: pd.DataFrame) -> dict:
             cash += MONTHLY_DCA
             pv   += MONTHLY_DCA
 
-        # Regime
-        spy_sma = sma200.iloc[i]
-        if pd.isna(spy_sma):
+        ma_val = ma200.iloc[i]
+        if pd.isna(ma_val):
             regime   = "BULL"
             interval = BULL_DAYS
         else:
-            regime   = "BULL" if row["SPY"] > spy_sma else "BEAR"
-            interval = BEAR_DAYS if regime == "BEAR" else BULL_DAYS
+            regime   = "BULL" if row["SPY"] > ma_val else "BEAR"
+            interval = bear_days if regime == "BEAR" else BULL_DAYS
 
         days_since   = i - last_rebal_idx
         time_trigger = days_since >= interval
 
-        # Drift trigger
         drift_trigger = False
         for s in prices.columns:
             target  = ALLOCATIONS[s]
@@ -221,101 +227,104 @@ def _run_adaptive(prices: pd.DataFrame) -> dict:
         if (time_trigger or drift_trigger) and i > 0:
             trigger = "TIME" if time_trigger else "DRIFT"
             for s in prices.columns:
-                target  = pv * ALLOCATIONS[s]
-                current = holdings[s] * row[s]
-                diff    = target - current
+                diff = pv * ALLOCATIONS[s] - holdings[s] * row[s]
                 holdings[s] += diff / row[s]
                 cash -= diff
             cash = 0.0
             last_rebal_idx = i
-            rebal_log.append({"date": date, "regime": regime, "trigger": trigger,
-                               "pv": round(pv, 2)})
+            rebal_log.append({"date": date, "regime": regime, "trigger": trigger})
 
         eq.append(cash + sum(holdings[s] * row[s] for s in prices.columns))
 
     total_invested = INITIAL_CAPITAL + n_months * MONTHLY_DCA
     final_value    = eq[-1]
     eq_s = pd.Series(eq)
-    peak = eq_s.expanding().max()
-    mdd  = ((peak - eq_s) / peak * 100).max()
-
-    bull_rebal = sum(1 for r in rebal_log if r["regime"] == "BULL")
-    bear_rebal = sum(1 for r in rebal_log if r["regime"] == "BEAR")
-    drift_rebal = sum(1 for r in rebal_log if r["trigger"] == "DRIFT")
+    mdd  = ((eq_s.expanding().max() - eq_s) / eq_s.expanding().max() * 100).max()
 
     return {
-        "label":            "Adaptive (BOT)",
+        "label":            label,
+        "bear_days":        bear_days,
+        "ma_type":          ma_type,
         "total_invested":   round(total_invested, 2),
         "final_value":      round(final_value, 2),
         "total_return_pct": round((final_value - total_invested) / total_invested * 100, 2),
         "rebalance_count":  len(rebal_log),
-        "bull_rebal":       bull_rebal,
-        "bear_rebal":       bear_rebal,
-        "drift_rebal":      drift_rebal,
+        "bull_rebal":       sum(1 for r in rebal_log if r["regime"] == "BULL"),
+        "bear_rebal":       sum(1 for r in rebal_log if r["regime"] == "BEAR"),
+        "drift_rebal":      sum(1 for r in rebal_log if r["trigger"] == "DRIFT"),
         "max_drawdown_pct": round(mdd, 2),
-        "rebalance_log":    rebal_log,
     }
 
 
 # ── Report ─────────────────────────────────────────────────────────────────────
 
-def run_period(label: str, start: str, end: str):
-    print(f"\n{'='*72}")
+def run_period(label: str, start: str, end: str) -> list:
+    """Run all strategy variants for one period. Returns list of result dicts."""
+    print(f"\n{'='*80}")
     print(f"  Period: {label}  ({start} → {end})")
     print(f"  Initial: ${INITIAL_CAPITAL:,.0f}  |  DCA: ${MONTHLY_DCA:.0f}/mo")
-    print(f"{'='*72}")
+    print(f"{'='*80}")
 
     try:
         prices = fetch_prices(start, end)
     except Exception as e:
         print(f"  ❌ Data fetch failed: {e}")
-        return
+        return []
 
     if len(prices) < 250:
-        print(f"  ⚠️  Only {len(prices)} bars — too short for meaningful test.")
-        return
+        print(f"  ⚠️  Only {len(prices)} bars — too short.")
+        return []
 
     bh      = _buy_and_hold(prices)
-    monthly = _run_fixed(prices, 21,  "Fixed monthly  (21d)")
+    monthly = _run_fixed(prices, 21,  "Fixed monthly (21d)")
     semi    = _run_fixed(prices, 126, "Fixed semi-ann (126d)")
-    bot     = _run_adaptive(prices)
 
-    bh_final = bh["final_value"]
+    variants = []
+    for bear_d in BEAR_CANDIDATES:
+        for ma in MA_TYPES:
+            variants.append(_run_adaptive(prices, bear_d, ma))
 
-    print(f"\n  {'Strategy':<26} {'Invested':>10} {'Final':>10} {'Return':>9} "
-          f"{'vs B&H':>9} {'Rebal#':>7} {'MaxDD':>8}")
-    print(f"  {'-'*76}")
+    bh_final  = bh["final_value"]
+    all_strats = [bh, monthly, semi] + variants
 
-    for r in [bh, monthly, semi, bot]:
-        vs_bh = f"{(r['final_value'] - bh_final) / bh_final * 100:+.2f}%" if r["label"] != "Buy & Hold" else "  base"
-        extra = ""
-        if r["label"] == "Adaptive (BOT)":
-            extra = (f"  ↳ BULL:{r.get('bull_rebal',0)} BEAR:{r.get('bear_rebal',0)} "
-                     f"DRIFT:{r.get('drift_rebal',0)}")
-        print(f"  {r['label']:<26} "
-              f"${r['total_invested']:>9,.2f} "
-              f"${r['final_value']:>9,.2f} "
-              f"{r['total_return_pct']:>+8.2f}% "
-              f"{vs_bh:>9} "
-              f"{r['rebalance_count']:>7} "
-              f"{r['max_drawdown_pct']:>7.2f}%"
-              f"{extra}")
+    print(f"\n  {'Strategy':<32} {'Return':>9} {'vs B&H':>9} "
+          f"{'Rebal#':>7} {'MaxDD':>8}  {'Breakdown'}")
+    print(f"  {'-'*82}")
 
-    # Winner
-    strategies = [bh, monthly, semi, bot]
-    best_ret = max(strategies, key=lambda r: r["total_return_pct"])
-    best_dd  = min(strategies, key=lambda r: r["max_drawdown_pct"])
-    print(f"\n  Best return:   {best_ret['label']} ({best_ret['total_return_pct']:+.2f}%)")
-    print(f"  Best drawdown: {best_dd['label']} ({best_dd['max_drawdown_pct']:.2f}%)")
+    print(f"  {'Buy & Hold':<32} {bh['total_return_pct']:>+8.2f}%   {'base':>8}  "
+          f"{0:>7}  {bh['max_drawdown_pct']:>7.2f}%")
+    print(f"  {'Fixed monthly (21d)':<32} {monthly['total_return_pct']:>+8.2f}%  "
+          f"{(monthly['final_value']-bh_final)/bh_final*100:>+8.2f}%  "
+          f"{monthly['rebalance_count']:>7}  {monthly['max_drawdown_pct']:>7.2f}%")
+    print(f"  {'Fixed semi-ann (126d)':<32} {semi['total_return_pct']:>+8.2f}%  "
+          f"{(semi['final_value']-bh_final)/bh_final*100:>+8.2f}%  "
+          f"{semi['rebalance_count']:>7}  {semi['max_drawdown_pct']:>7.2f}%")
+    print(f"  {'-'*82}")
+
+    for r in variants:
+        vs_bh   = (r["final_value"] - bh_final) / bh_final * 100
+        detail  = f"BULL:{r['bull_rebal']} BEAR:{r['bear_rebal']} DRIFT:{r['drift_rebal']}"
+        print(f"  {r['label']:<32} {r['total_return_pct']:>+8.2f}%  "
+              f"{vs_bh:>+8.2f}%  "
+              f"{r['rebalance_count']:>7}  {r['max_drawdown_pct']:>7.2f}%  {detail}")
+
+    best_var = max(variants, key=lambda r: r["total_return_pct"])
+    best_dd  = min(variants, key=lambda r: r["max_drawdown_pct"])
+    print(f"\n  ★ Best return (bot variants): {best_var['label']} "
+          f"({best_var['total_return_pct']:+.2f}%  vs B&H {(best_var['final_value']-bh_final)/bh_final*100:+.2f}%)")
+    print(f"  ★ Best drawdown (bot variants): {best_dd['label']} "
+          f"({best_dd['max_drawdown_pct']:.2f}%)")
+
+    return [{"period": label, **r} for r in variants]
 
 
 def main():
     today = datetime.today().strftime("%Y-%m-%d")
-    print(f"\n{'#'*72}")
-    print(f"  ADAPTIVE BOT BACKTEST REPORT — {today}")
+    print(f"\n{'#'*80}")
+    print(f"  ADAPTIVE BOT BACKTEST — {today}")
     print(f"  Portfolio: SPY 30% | QQQ 10% | VGK 10% | GLD 25% | BTC 15% | ETH 10%")
-    print(f"  Bot logic: BULL={BULL_DAYS}d | BEAR={BEAR_DAYS}d | Drift>{DRIFT_THRESHOLD}%")
-    print(f"{'#'*72}")
+    print(f"  BULL={BULL_DAYS}d | BEAR sweep={BEAR_CANDIDATES} | MA={MA_TYPES} | Drift>{DRIFT_THRESHOLD}%")
+    print(f"{'#'*80}")
 
     periods = [
         ("1 year  (2025–2026)", "2025-04-01", today),
@@ -324,10 +333,32 @@ def main():
         ("5 years (2021–2026)", "2021-04-01", today),
     ]
 
+    all_results = []
     for label, start, end in periods:
-        run_period(label, start, end)
+        all_results.extend(run_period(label, start, end))
 
-    print(f"\n{'#'*72}\n")
+    # ── Cross-period summary: rank each variant by avg return vs B&H ──────────
+    if all_results:
+        print(f"\n\n{'#'*80}")
+        print(f"  CROSS-PERIOD SUMMARY — avg return across all periods")
+        print(f"{'#'*80}")
+
+        from collections import defaultdict
+        totals = defaultdict(list)
+        for r in all_results:
+            totals[r["label"]].append(r["total_return_pct"])
+
+        ranked = sorted(totals.items(), key=lambda x: -sum(x[1])/len(x[1]))
+        print(f"\n  {'Variant':<32} {'Avg Return':>12}  {'1y':>8} {'2y':>8} {'3y':>8} {'5y':>8}")
+        print(f"  {'-'*72}")
+        for name, returns in ranked:
+            avg = sum(returns) / len(returns)
+            cols = "  ".join(f"{r:>+7.2f}%" for r in returns)
+            print(f"  {name:<32} {avg:>+11.2f}%  {cols}")
+
+        winner = ranked[0][0]
+        print(f"\n  ★ Overall winner: {winner}")
+        print(f"{'#'*80}\n")
 
 
 if __name__ == "__main__":
