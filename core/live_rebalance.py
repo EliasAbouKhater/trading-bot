@@ -58,18 +58,36 @@ def save_state(state: dict):
 
 # ── Macro regime ──────────────────────────────────────────────────────────────
 
+REGIME_BUFFER = 0.01  # 1% hysteresis band around EMA200 — prevents whipsaw with EMA
+
+
 def get_macro_regime(last_known_regime: str = "BULL") -> dict:
-    """Fetch SPY 200-day SMA. Falls back to last_known_regime on any failure."""
+    """Fetch SPY EMA-200 to determine bull/bear regime.
+
+    Uses 2y of data (>2× span) so the EMA is fully settled before use.
+    Hysteresis: only flips regime when SPY breaks 1% above/below EMA200.
+    Inside the band, holds the previous regime to prevent whipsaw.
+    Falls back to last_known_regime on any network/data failure.
+    """
     try:
-        df = yf.download("SPY", period="1y", interval="1d", progress=False)
+        df = yf.download("SPY", period="2y", interval="1d", progress=False)
         if len(df) < 200:
             return {"regime": last_known_regime, "spy_price": 0, "ema_200": 0,
                     "gap_pct": 0, "fallback": True}
         ema_200   = float(df["Close"].ewm(span=200, adjust=False).mean().iloc[-1].iloc[0])
         spy_price = float(df["Close"].iloc[-1].iloc[0])
         gap_pct   = (spy_price - ema_200) / ema_200 * 100
+
+        # Hysteresis: only flip when price breaks clearly outside the band
+        if spy_price > ema_200 * (1 + REGIME_BUFFER):
+            regime = "BULL"
+        elif spy_price < ema_200 * (1 - REGIME_BUFFER):
+            regime = "BEAR"
+        else:
+            regime = last_known_regime  # inside band — hold previous regime
+
         return {
-            "regime":    "BULL" if spy_price > ema_200 else "BEAR",
+            "regime":    regime,
             "spy_price": round(spy_price, 2),
             "ema_200":   round(ema_200, 2),
             "gap_pct":   round(gap_pct, 2),

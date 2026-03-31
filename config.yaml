@@ -64,7 +64,7 @@ rebalance:
     min_pct: 2.0                # floor: never trigger below 2pp drift
     max_pct: 20.0               # cap: always trigger above 20pp drift
     bull_factor: 1.5            # widen thresholds in bull (let winners run)
-    bear_factor: 0.7            # tighten thresholds in bear (react faster)
+    bear_factor: 0.9            # tighten thresholds in bear (EMA already reacts early — don't double-tighten)
 
   allocations:
     # Stocks — 50%
