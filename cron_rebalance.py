@@ -162,7 +162,7 @@ def main():
         macro = result.get("macro", {})
         if macro:
             log.info(f"  Regime: {macro.get('regime')} "
-                     f"(SPY ${macro.get('spy_price')} / SMA200 ${macro.get('sma_200')}, "
+                     f"(SPY ${macro.get('spy_price')} / EMA200 ${macro.get('ema_200')}, "
                      f"{macro.get('gap_pct', 0):+.1f}%)"
                      + (" [fallback]" if macro.get("fallback") else ""))
 

@@ -63,19 +63,19 @@ def get_macro_regime(last_known_regime: str = "BULL") -> dict:
     try:
         df = yf.download("SPY", period="1y", interval="1d", progress=False)
         if len(df) < 200:
-            return {"regime": last_known_regime, "spy_price": 0, "sma_200": 0,
+            return {"regime": last_known_regime, "spy_price": 0, "ema_200": 0,
                     "gap_pct": 0, "fallback": True}
-        sma_200   = float(df["Close"].rolling(200).mean().iloc[-1].iloc[0])
+        ema_200   = float(df["Close"].ewm(span=200, adjust=False).mean().iloc[-1].iloc[0])
         spy_price = float(df["Close"].iloc[-1].iloc[0])
-        gap_pct   = (spy_price - sma_200) / sma_200 * 100
+        gap_pct   = (spy_price - ema_200) / ema_200 * 100
         return {
-            "regime":    "BULL" if spy_price > sma_200 else "BEAR",
+            "regime":    "BULL" if spy_price > ema_200 else "BEAR",
             "spy_price": round(spy_price, 2),
-            "sma_200":   round(sma_200, 2),
+            "ema_200":   round(ema_200, 2),
             "gap_pct":   round(gap_pct, 2),
         }
     except Exception:
-        return {"regime": last_known_regime, "spy_price": 0, "sma_200": 0,
+        return {"regime": last_known_regime, "spy_price": 0, "ema_200": 0,
                 "gap_pct": 0, "fallback": True}
 
 
@@ -739,7 +739,7 @@ def build_daily_digest(state: dict, broker: AlpacaBroker,
         f"*Trading Bot Daily* — {now.strftime('%Y-%m-%d %H:%M')}\n"
         f"⏱ Uptime: {uptime_str}\n\n"
         f"{regime_icon} *Market:* {macro['regime']}{fallback_note} | {market_status}\n"
-        f"SPY ${macro['spy_price']} / SMA200 ${macro['sma_200']} ({macro['gap_pct']:+.1f}%)\n\n"
+        f"SPY ${macro['spy_price']} / EMA200 ${macro['ema_200']} ({macro['gap_pct']:+.1f}%)\n\n"
         f"💼 *Portfolio:* ${portfolio_value:,.2f} | Cash: ${float(acct['cash']):,.2f}\n"
         f"*Positions:*{pos_lines}\n\n"
         f"*Status:* {phase}{phase_lines}"
@@ -778,7 +778,7 @@ def print_rebalance_result(result: dict):
             print(f"  Note: {result['note']}")
         macro = result.get("macro", {})
         print(f"  Market: {macro.get('regime')} (SPY ${macro.get('spy_price')} "
-              f"vs SMA200 ${macro.get('sma_200')}, {macro.get('gap_pct', 0):+.1f}%)")
+              f"vs EMA200 ${macro.get('ema_200')}, {macro.get('gap_pct', 0):+.1f}%)")
         pv = result.get("portfolio_value")
         if pv:
             print(f"  Portfolio: ${pv:,.2f}")
