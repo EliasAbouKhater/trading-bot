@@ -13,10 +13,12 @@ Logs to ~/trading-bot/logs/rebalance.log.
 """
 
 import os
+import re
+import subprocess
 import sys
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -41,6 +43,47 @@ log = logging.getLogger(__name__)
 
 BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ADMIN_ID  = int(os.environ["TELEGRAM_ADMIN_ID"])
+
+
+VENV_PYTHON = ROOT / "venv" / "bin" / "python"
+RUN_CMD     = f"cd {ROOT} && {VENV_PYTHON} {ROOT / 'cron_rebalance.py'} >> {ROOT / 'logs' / 'cron.log'} 2>&1"
+
+
+def schedule_at_open(next_open_iso: str, state: dict, save_state_fn) -> None:
+    """Schedule a one-shot run at the exact market open time using `at`.
+    Cancels any previously scheduled at-open job first.
+    """
+    # Cancel previous at-open job if any
+    prev_job = state.get("at_open_job_id")
+    if prev_job:
+        subprocess.run(["atrm", str(prev_job)], capture_output=True)
+        state.pop("at_open_job_id", None)
+
+    # Parse next_open — Alpaca returns UTC ISO string
+    next_open = datetime.fromisoformat(next_open_iso).astimezone()
+    at_time   = next_open.strftime("%H:%M %Y-%m-%d")  # HH:MM YYYY-MM-DD
+
+    result = subprocess.run(
+        ["at", at_time],
+        input=RUN_CMD, text=True, capture_output=True,
+    )
+    m = re.search(r"job (\d+)", result.stderr)
+    if m:
+        state["at_open_job_id"] = int(m.group(1))
+        save_state_fn(state)
+        log.info(f"Scheduled at-open job #{m.group(1)} for {at_time}")
+    else:
+        log.warning(f"at scheduling failed: {result.stderr.strip()}")
+
+
+def cancel_at_open_job(state: dict, save_state_fn) -> None:
+    """Cancel the pending at-open job if one exists."""
+    job_id = state.get("at_open_job_id")
+    if job_id:
+        subprocess.run(["atrm", str(job_id)], capture_output=True)
+        state.pop("at_open_job_id", None)
+        save_state_fn(state)
+        log.info(f"Cancelled at-open job #{job_id}")
 
 
 def send_telegram(text: str):
@@ -94,8 +137,18 @@ def main():
                      f"${o.get('notional', 0):.2f}{fee_str} → {o.get('status', '?')}")
 
         if action == "DECISION_DEFERRED":
-            deferred = result.get("deferred_until_open", [])
-            log.info(f"  {len(deferred)} order(s) deferred — market opens {result.get('next_open','?')[:16]}")
+            deferred   = result.get("deferred_until_open", [])
+            next_open  = result.get("next_open", "")
+            log.info(f"  {len(deferred)} order(s) deferred — market opens {next_open[:16]}")
+            if next_open:
+                state = load_state()
+                schedule_at_open(next_open, state, save_state)
+
+        if action in ("REBALANCE", "INITIAL_BUY", "CONFIRMED", "AWAITING_FILLS"):
+            # Transitioned out of PENDING_MARKET_OPEN — cancel any at-open job
+            state = load_state()
+            if state.get("at_open_job_id"):
+                cancel_at_open_job(state, save_state)
 
         if action == "CONFIRMED":
             aw = result.get("actual_weights", {})
@@ -119,7 +172,6 @@ def main():
             log.info("Sending daily digest...")
             msg = build_daily_digest(state, broker, allocations, cfg)
             send_telegram(msg)
-            from datetime import timezone
             state["last_digest_date"] = datetime.now(timezone.utc).date().isoformat()
             save_state(state)
             log.info("Daily digest sent.")
