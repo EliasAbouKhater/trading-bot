@@ -136,14 +136,22 @@ def compute_drift_thresholds(allocations: dict, drift_cfg: dict) -> dict:
     return thresholds
 
 
+THRESHOLD_CACHE_MAX_AGE_DAYS = 7
+
 def _get_thresholds(state: dict, allocations: dict, drift_cfg: dict) -> dict:
-    """Return cached thresholds if computed today, else recompute and cache."""
-    today  = datetime.now().date().isoformat()
+    """Return cached thresholds if computed within the last 7 days, else recompute."""
+    today  = datetime.now().date()
     cached = state.get("cached_thresholds", {})
-    if cached.get("computed_at") == today:
-        return cached["thresholds"]
+    computed_at_str = cached.get("computed_at")
+    if computed_at_str:
+        try:
+            computed_at = datetime.strptime(computed_at_str, "%Y-%m-%d").date()
+            if (today - computed_at).days < THRESHOLD_CACHE_MAX_AGE_DAYS:
+                return cached["thresholds"]
+        except ValueError:
+            pass
     thresholds = compute_drift_thresholds(allocations, drift_cfg)
-    state["cached_thresholds"] = {"thresholds": thresholds, "computed_at": today}
+    state["cached_thresholds"] = {"thresholds": thresholds, "computed_at": today.isoformat()}
     return thresholds
 
 
